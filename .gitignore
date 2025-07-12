@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+
+#Virtual environment
+venv/
+.env/
+
+# Node
+node_modules/
+npm-debug.log*
+
+# React
+.eslintcache
+.DS_Store
+
+# Environment variables
+.env
+
+
