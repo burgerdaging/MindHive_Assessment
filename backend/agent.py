@@ -1,6 +1,6 @@
 import os
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from langchain.agents import tool, AgentExecutor, create_tool_calling_agent
@@ -13,12 +13,18 @@ from langchain_mongodb import MongoDBAtlasVectorSearch
 from langchain.chains.retrieval import create_retrieval_chain
 from langchain.chains.combine_documents import create_stuff_documents_chain
 from langchain.memory import ConversationBufferMemory
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 import json
 import datetime
+import requests
+import sqlite3
+import re
+from urllib.parse import quote_plus
+import asyncio
 
+#Part 2 & 3 & 4 & 5 endpoints are here
 load_dotenv()
-app = FastAPI()
+app = FastAPI(title="ZUS Coffee AI Assistant", description="AI Assistant with Agentic Planning and ZUS Coffee Integration")
 
 app.add_middleware(
     CORSMiddleware,
@@ -30,14 +36,318 @@ app.add_middleware(
 
 # Configuration
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+GOOGLE_SEARCH_API_KEY = os.getenv("GOOGLE_SEARCH_API_KEY")
+SEARCH_ENGINE_ID = os.getenv("SEARCH_ENGINE_ID")
 llm = ChatGoogleGenerativeAI(model="gemini-2.0-flash", api_key=GEMINI_API_KEY, temperature=0.0)
 embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001", google_api_key=GEMINI_API_KEY)
 client = MongoClient(os.getenv("MONGODB_ATLAS_CLUSTER_URI"))
 
 DB_NAME = "MongoDB"
 COLLECTION_NAME = "Facts-txt"
+COLLECTION_NAME_TWO = "Zus-Coffee-Document.pdf"
 ATLAS_VECTOR_SEARCH_INDEX_NAME = "MindHive-Assessment"
 MONGODB_COLLECTION = client[DB_NAME][COLLECTION_NAME]
+
+#Zus Product Collection
+ZUS_PRODUCTS_COLLECTION = client[DB_NAME][COLLECTION_NAME_TWO]
+ZUS_VECTOR_INDEX_NAME = "MindHive-Assessment"
+
+# ============= ENHANCED PYDANTIC MODELS =============
+
+class QueryRequest(BaseModel):
+    message: str
+    chat_history: List[Dict] = []
+
+class QueryResponse(BaseModel):
+    response: str
+    tools_used: List[str] = []
+    decision_points: List[str] = []
+    success: bool = True
+
+class ProductQueryResponse(BaseModel):
+    summary: str
+    products: List[Dict[str, Any]]
+    query: str
+    total_found: int
+    success: bool = True
+    sources: List[str] = []
+
+class OutletQueryResponse(BaseModel):
+    summary: str
+    outlets: List[Dict[str, Any]]
+    query: str
+    total_found: int
+    success: bool = True
+    sources: List[str] = []
+
+# ============= GOOGLE CUSTOM SEARCH ENGINE INTEGRATION =============
+
+class GoogleCustomSearchTool:
+    def __init__(self):
+        self.api_key = GOOGLE_SEARCH_API_KEY
+        self.search_engine_id = SEARCH_ENGINE_ID
+        self.base_url = "https://www.googleapis.com/customsearch/v1"
+        
+    def search_zus_website(self, query: str, num_results: int = 10) -> Dict[str, Any]:
+        """Search ZUS Coffee website using Google Custom Search"""
+        try:
+            print(f"🔍 Searching ZUS website for: {query}")
+            
+            if not self.api_key:
+                return {
+                    "query": query,
+                    "results": [],
+                    "error": "Google Search API key not configured",
+                    "success": False
+                }
+            
+            # Prepare search parameters
+            params = {
+                'key': self.api_key,
+                'cx': self.search_engine_id,
+                'q': query,
+                'num': min(num_results, 10),
+                'safe': 'active'
+            }
+            
+            # Make API request with error handling
+            response = requests.get(self.base_url, params=params, timeout=10)
+            response.raise_for_status()
+            
+            search_data = response.json()
+            processed_results = self._process_search_results(search_data, query)
+            
+            return {
+                "query": query,
+                "results": processed_results,
+                "total_results": search_data.get("searchInformation", {}).get("totalResults", "0"),
+                "search_time": search_data.get("searchInformation", {}).get("searchTime", "0"),
+                "success": True
+            }
+            
+        except requests.exceptions.RequestException as e:
+            print(f"❌ Search API error: {e}")
+            return {
+                "query": query,
+                "results": [],
+                "error": f"Search API error: {str(e)}",
+                "success": False
+            }
+        except Exception as e:
+            print(f"❌ Unexpected search error: {e}")
+            return {
+                "query": query,
+                "results": [],
+                "error": f"Unexpected error: {str(e)}",
+                "success": False
+            }
+    
+    def _process_search_results(self, search_data: Dict, query: str) -> List[Dict]:
+        """Process and clean search results"""
+        processed_results = []
+        items = search_data.get("items", [])
+        
+        for item in items:
+            try:
+                result = {
+                    "title": item.get("title", ""),
+                    "link": item.get("link", ""),
+                    "snippet": item.get("snippet", ""),
+                    "display_link": item.get("displayLink", ""),
+                    "category": self._detect_category(item)
+                }
+                result["snippet"] = self._clean_snippet(result["snippet"])
+                processed_results.append(result)
+            except Exception as e:
+                print(f"❌ Error processing search result: {e}")
+                continue
+        
+        return processed_results
+    
+    def _detect_category(self, item: Dict) -> str:
+        """Detect if result is about products, outlets, or general info"""
+        title = item.get("title", "").lower()
+        link = item.get("link", "").lower()
+        snippet = item.get("snippet", "").lower()
+        combined_text = f"{title} {link} {snippet}"
+        
+        if any(word in combined_text for word in ["drinkware", "tumbler", "mug", "cup", "bottle", "flask", "shop"]):
+            return "product"
+        elif any(word in combined_text for word in ["store", "outlet", "location", "address", "branch"]):
+            return "outlet"
+        else:
+            return "general"
+    
+    def _clean_snippet(self, snippet: str) -> str:
+        """Clean and format snippet text"""
+        if not snippet:
+            return ""
+        cleaned = re.sub(r'\s+', ' ', snippet.strip())
+        cleaned = re.sub(r'^\d+\s*[.-]\s*', '', cleaned)
+        return cleaned
+
+# Initialize search tool
+google_search_tool = GoogleCustomSearchTool()
+
+# ============= ZUS PRODUCTS SERVICE (Vector Store Only) =============
+
+class ZUSProductsService:
+    def __init__(self):
+        self.embeddings = embeddings
+        self.collection = ZUS_PRODUCTS_COLLECTION
+        self.llm = llm
+        self.vector_index_name = ZUS_VECTOR_INDEX_NAME
+        self.search_tool = google_search_tool
+    
+    async def search_products(self, query: str, top_k: int = 5) -> Dict[str, Any]:
+        """Search ZUS products using vector store and live search"""
+        try:
+            print(f"🔍 Searching ZUS products for: {query}")
+            
+            results = {
+                "query": query,
+                "vector_results": [],
+                "live_search_results": [],
+                "combined_summary": "",
+                "success": True,
+                "sources": []
+            }
+            
+            # 1. Search vector store (your ZUS document)
+            try:
+                vector_results = await self._search_vector_store(query, top_k)
+                results["vector_results"] = vector_results
+                if vector_results:
+                    results["sources"].append("ZUS Document Store")
+            except Exception as e:
+                print(f"⚠️ Vector search failed: {e}")
+                results["vector_results"] = []
+            
+            # 2. Search live website as backup
+            try:
+                live_results = self._search_live_website(query)
+                results["live_search_results"] = live_results
+                if live_results:
+                    results["sources"].append("Live Website")
+            except Exception as e:
+                print(f"⚠️ Live search failed: {e}")
+                results["live_search_results"] = []
+            
+            # 3. Generate combined summary
+            results["combined_summary"] = await self._generate_combined_summary(query, results)
+            
+            return results
+            
+        except Exception as e:
+            print(f"❌ Error in product search: {e}")
+            return {
+                "query": query,
+                "vector_results": [],
+                "live_search_results": [],
+                "combined_summary": f"Search error: {str(e)}",
+                "success": False,
+                "sources": []
+            }
+    
+    async def _search_vector_store(self, query: str, top_k: int) -> List[Dict]:
+        """Search ZUS products in vector store"""
+        try:
+            # Enhanced query for better product search
+            enhanced_query = f"{query} ZUS Coffee drinkware products tumbler mug"
+            
+            vector_search = MongoDBAtlasVectorSearch(
+                embedding=self.embeddings,
+                collection=self.collection,
+                index_name=self.vector_index_name,
+            )
+            
+            retriever = vector_search.as_retriever(search_kwargs={"k": top_k})
+            relevant_docs = retriever.get_relevant_documents(enhanced_query)
+            
+            return [
+                {
+                    "content": doc.page_content,
+                    "source": doc.metadata.get("source", "ZUS Document"),
+                    "type": "stored_document"
+                }
+                for doc in relevant_docs
+            ]
+            
+        except Exception as e:
+            print(f"❌ Vector store search error: {e}")
+            return []
+    
+    def _search_live_website(self, query: str) -> List[Dict]:
+        """Search live ZUS website for products"""
+        try:
+            enhanced_query = f"{query} drinkware products ZUS Coffee shop"
+            search_results = self.search_tool.search_zus_website(enhanced_query, num_results=5)
+            
+            if not search_results["success"]:
+                return []
+            
+            product_results = []
+            for result in search_results["results"]:
+                if result["category"] in ["product", "general"]:
+                    product_results.append({
+                        "title": result["title"],
+                        "url": result["link"],
+                        "description": result["snippet"],
+                        "category": result["category"],
+                        "type": "live_search"
+                    })
+            
+            return product_results
+            
+        except Exception as e:
+            print(f"❌ Live search error: {e}")
+            return []
+    
+    async def _generate_combined_summary(self, query: str, results: Dict) -> str:
+        """Generate AI summary combining all sources"""
+        try:
+            context_parts = []
+            
+            if results["vector_results"]:
+                context_parts.append("=== ZUS Product Documentation ===")
+                for result in results["vector_results"]:
+                    context_parts.append(result["content"])
+            
+            if results["live_search_results"]:
+                context_parts.append("\n=== Live Website Information ===")
+                for result in results["live_search_results"]:
+                    context_parts.append(f"Title: {result['title']}\nDescription: {result['description']}\nURL: {result['url']}")
+            
+            if not context_parts:
+                return "No relevant ZUS Coffee drinkware products found for your query."
+            
+            combined_context = "\n\n".join(context_parts)
+            
+            summary_prompt = f"""
+            Based on the following information about ZUS Coffee drinkware products, provide a comprehensive and helpful summary for the user's query: "{query}"
+
+            Available Information:
+            {combined_context}
+
+            Instructions:
+            1. Provide a clear, helpful summary that directly addresses the user's query
+            2. Highlight relevant drinkware products and their features
+            3. Include specific details like prices, materials, and features when available
+            4. If you have both stored and live information, combine them intelligently
+            5. Keep the response customer-focused and actionable
+            6. If live website links are available, mention them
+
+            Summary:
+            """
+            
+            response = self.llm.invoke(summary_prompt)
+            return response.content.strip()
+            
+        except Exception as e:
+            print(f"❌ Error generating summary: {e}")
+            return f"Unable to generate summary: {str(e)}"
+
+
 
 # ============= TOOLS IMPLEMENTATION =============
 
@@ -144,18 +454,6 @@ agent_executor = AgentExecutor(
     max_iterations=5,
     handle_parsing_errors=True
 )
-
-# ============= PYDANTIC MODELS =============
-
-class QueryRequest(BaseModel):
-    message: str
-    chat_history: List[Dict] = []
-
-class QueryResponse(BaseModel):
-    response: str
-    tools_used: List[str] = []
-    decision_points: List[str] = []
-    success: bool = True
 
 # ============= AGENTIC PLANNER CLASS =============
 

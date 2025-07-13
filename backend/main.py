@@ -1,4 +1,5 @@
 # backend/app.py
+# Part 1 endpoint is here
 import os
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
