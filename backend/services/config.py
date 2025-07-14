@@ -15,7 +15,7 @@ class Settings:
     DB_NAME = "MongoDB"
     COLLECTION_NAME = "Facts-txt"
     ZUS_COLLECTION_NAME = "Zus-Coffee-Document"  # Make sure this collection exists
-    ATLAS_VECTOR_SEARCH_INDEX_NAME = "vector-index"  # Make sure this index exists
+    ATLAS_VECTOR_SEARCH_INDEX_NAME = "vector_index"  # Make sure this index exists
     ATLAS_VECTOR_SEARCH_INDEX_NAME_TWO = "text-index-pdf"
     
     # Application Settings

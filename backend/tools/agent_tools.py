@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 # Initialize services
 products_service = ZUSProductsService()
 outlets_service = ZUSOutletsService()
-search_service = GoogleCustomSearchService()
+# search_service = GoogleCustomSearchService()
 
 # Initialize LLM and embeddings
 llm = ChatGoogleGenerativeAI(model="gemini-2.0-flash", api_key=settings.GEMINI_API_KEY, temperature=0.0)
@@ -72,8 +72,9 @@ def get_current_time(query: str) -> str:
 @tool
 def calculator(expression: str) -> str:
     """
-    Evaluates a mathematical expression safely. Use this for any math questions.
-    Supports basic arithmetic: +, -, *, /, (), and basic functions like sqrt, sin, cos.
+    Evaluates a mathematical expression safely. Use this for ALL arithmetic and calculations.
+    Supports: +, -, *, /, (), and basic functions like sqrt, sin, cos.
+    Example: "2 + 3 * 4", "sqrt(16)"
     """
     try:
         # Input validation for security
@@ -104,8 +105,8 @@ def calculator(expression: str) -> str:
 @tool
 def knowledge_base_search(query: str) -> str:
     """
-    Searches the MongoDB Atlas vector database for relevant information.
-    Use this tool when users ask factual questions or need information retrieval.
+    Searches a general knowledge base for factual information. Use this tool for questions NOT related to ZUS Coffee.
+    Example: "What is the capital of France?", "Tell me about Python programming"
     """
     try:
         # Input validation
@@ -116,7 +117,7 @@ def knowledge_base_search(query: str) -> str:
         vector_search = MongoDBAtlasVectorSearch(
             embedding=embeddings,
             collection=mongodb_collection,
-            index_name=settings.ATLAS_VECTOR_SEARCH_INDEX_NAME,
+            index_name=settings.ATLAS_VECTOR_SEARCH_INDEX_NAME_TWO,
         )
         
         # Create retrieval chain
@@ -139,8 +140,8 @@ def knowledge_base_search(query: str) -> str:
         logger.error(f"Knowledge base search error: {e}")
         return f"Error searching knowledge base: {str(e)}. Please try rephrasing your question."
 
-@tool
-def search_zus_website(query: str) -> str:
+# @tool
+# def search_zus_website(query: str) -> str:
     """
     Search ZUS Coffee website for products, outlets, or general information.
     Use this tool when users ask about ZUS Coffee products, store locations, or general company information.
@@ -187,8 +188,8 @@ Search completed in: {search_results['search_time']} seconds"""
 @tool
 def search_zus_products(query: str) -> str:
     """
-    Search ZUS Coffee drinkware products using vector store and live website.
-    Use this tool when users ask specifically about ZUS Coffee products, drinkware, tumblers, mugs, etc.
+    Search ZUS Coffee drinkware products. Use this tool when users ask specifically about ZUS Coffee products, drinkware, tumblers, mugs, cups, bottles, or their prices.
+    Example: "price of 600ml tumbler", "what tumblers do you have?", "ZUS coffee mugs"
     """
     try:
         # Input validation
@@ -210,8 +211,8 @@ def search_zus_products(query: str) -> str:
 @tool
 def search_zus_outlets(query: str) -> str:
     """
-    Search ZUS Coffee outlet locations using vector store and live website.
-    Use this tool when users ask about ZUS Coffee store locations, outlets, branches, addresses, or operating hours.
+    Search ZUS Coffee outlet locations. Use this tool when users ask about ZUS Coffee store locations, addresses, branches, operating hours, or services at a store.
+    Example: "outlets in Cyberjaya", "ZUS Coffee KLCC hours", "stores with delivery"
     """
     try:
         # Input validation
@@ -235,7 +236,7 @@ AVAILABLE_TOOLS = [
     get_current_time,
     calculator,
     knowledge_base_search,
-    search_zus_website,
+    # search_zus_website,
     search_zus_products,
     search_zus_outlets
 ]

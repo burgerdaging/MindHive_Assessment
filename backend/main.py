@@ -1,11 +1,11 @@
+import asyncio
 import logging
-from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
-from api.products import router as products_router
-from api.outlets import router as outlets_router
-from api.agent import router as agent_router
-from config import settings
+from typing import List, Dict, Any
+
+# Import necessary components from your project structure
+from tools.planner import AgenticPlanner
+from models.schemas import QueryRequest, QueryResponse # To mimic API request/response
+from langchain_core.messages import HumanMessage, AIMessage, BaseMessage # For handling chat history objects
 
 # Configure logging
 logging.basicConfig(
@@ -14,98 +14,118 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Create FastAPI app
-app = FastAPI(
-    title=settings.APP_NAME,
-    description="AI Assistant with Agentic Planning and ZUS Coffee Integration",
-    version=settings.APP_VERSION,
-    docs_url="/docs",
-    redoc_url="/redoc"
-)
+class TerminalChat:
+    def __init__(self):
+        # Initialize the AgenticPlanner, which contains the LLM, tools, and memory
+        self.planner = AgenticPlanner()
+        # This will store the chat history as LangChain BaseMessage objects
+        self.chat_history: List[BaseMessage] = [] # Changed type hint to be more precise
 
-# Add CORS middleware
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+    async def handle_query(self, query: str) -> str:
+        """
+        Processes user query using the AgenticPlanner and returns the response.
+        Manages the conversion of chat history between internal LangChain objects
+        and Pydantic-compatible dictionaries for the planner.
+        """
+        try: # <--- UNCOMMENTED THIS 'try' BLOCK
+            # 1. Prepare chat history for the planner
+            # The planner's `plan_and_execute` expects a list of dictionaries
+            # where each dict represents a message (e.g., {"type": "human", "content": "..."})
+            # We convert our internal LangChain BaseMessage objects to this format.
+            chat_history_for_planner = [msg.dict() for msg in self.chat_history]
 
-# Global exception handler
-@app.exception_handler(Exception)
-async def global_exception_handler(request, exc):
-    logger.error(f"Global exception: {exc}")
-    return JSONResponse(
-        status_code=500,
-        content={
-            "error": "Internal server error",
-            "message": "An unexpected error occurred. Please try again later.",
-            "recovery_suggestions": [
-                "Check your input and try again",
-                "Contact support if the issue persists",
-                "Try a different query or endpoint"
-            ]
-        }
-    )
+            # 2. Create a QueryRequest object (mimics the FastAPI endpoint's input)
+            request_data = QueryRequest(
+                message=query,
+                chat_history=chat_history_for_planner
+            )
 
-# Include routers
-app.include_router(products_router)
-app.include_router(outlets_router)
-app.include_router(agent_router)
+            # 3. Call the AgenticPlanner's core method
+            # This is where the agent decides which tool to use, executes it, and generates a response.
+            # It also returns the updated chat history from its internal memory.
+            # IMPORTANT: ADD 'await' HERE
+            planner_result = await self.planner.plan_and_execute( # <--- ADDED 'await'
+                request_data.message,
+                request_data.chat_history
+            )
 
-@app.get("/")
-async def root():
-    """Root endpoint with API information"""
-    return {
-        "message": "ZUS Coffee AI Assistant API",
-        "version": settings.APP_VERSION,
-        "endpoints": {
-            "products": "/products?query=<your_question>",
-            "outlets": "/outlets?query=<your_question>",
-            "agent": "/agent/chat (POST)",
-            "docs": "/docs",
-            "health": "/health"
-        },
-        "features": [
-            "Agentic Planning and Tool Calling",
-            "ZUS Coffee Product Search",
-            "ZUS Coffee Outlet Search with Text2SQL",
-            "Vector Store Integration",
-            "Live Website Search",
-            "Error Handling and Security"
-        ]
-    }
+            # 4. Extract the final response and the updated chat history
+            final_answer = planner_result["final_answer"]
+            updated_chat_history_dicts = planner_result["updated_chat_history"]
 
-@app.get("/health")
-async def health_check():
-    """Global health check endpoint"""
-    try:
-        return {
-            "status": "healthy",
-            "app": settings.APP_NAME,
-            "version": settings.APP_VERSION,
-            "services": {
-                "products": "/products/health",
-                "outlets": "/outlets/health", 
-                "agent": "/agent/health"
-            }
-        }
-    except Exception as e:
-        logger.error(f"Health check failed: {e}")
-        return JSONResponse(
-            status_code=503,
-            content={
-                "status": "unhealthy",
-                "error": str(e)
-            }
-        )
+            # 5. Update the TerminalChat's internal chat_history
+            # Convert the dictionary representation back to LangChain BaseMessage objects
+            # for consistent internal state and easy printing.
+            self.chat_history = []
+            for msg_dict in updated_chat_history_dicts:
+                if msg_dict['type'] == 'human':
+                    self.chat_history.append(HumanMessage(content=msg_dict['content']))
+                elif msg_dict['type'] == 'ai':
+                    self.chat_history.append(AIMessage(content=msg_dict['content']))
+                # Add other message types if your agent uses them (e.g., ToolMessage, FunctionMessage)
+
+            return final_answer
+
+        except Exception as e: # <--- UNCOMMENTED THIS 'except' BLOCK
+            error_msg = f"Error processing your request: {str(e)}"
+            # Append the error to history for debugging
+            self.chat_history.append(HumanMessage(content=query))
+            self.chat_history.append(AIMessage(content=error_msg))
+            logger.error(f"Error in handle_query: {e}", exc_info=True) # Log full traceback
+            return error_msg
+
+    def print_history(self):
+        """Display conversation history using LangChain BaseMessage objects."""
+        print("\n=== Conversation History ===")
+        if not self.chat_history:
+            print("No conversation history yet.")
+        else:
+            for i, msg in enumerate(self.chat_history):
+                if isinstance(msg, HumanMessage):
+                    print(f"User: {msg.content}")
+                elif isinstance(msg, AIMessage):
+                    print(f"Bot: {msg.content}")
+                # You can add more specific formatting for other message types if needed
+        print("===========================")
+
+async def main():
+    chat = TerminalChat()
+    print("\n" + "="*50)
+    print("ZUS Coffee AI Assistant - Terminal Version")
+    print("Type 'quit', 'exit', or 'bye' to end the chat")
+    print("Type 'history' to view conversation history")
+    print("="*50 + "\n")
+
+    while True:
+        try:
+            query = input("You: ").strip()
+
+            if query.lower() in ['quit', 'exit', 'bye']:
+                chat.print_history()
+                print("\nGoodbye! Have a great day!\n")
+                break
+
+            if query.lower() == 'history':
+                chat.print_history()
+                continue
+
+            if not query:
+                print("Please enter a question or command")
+                continue
+
+            response = await chat.handle_query(query)
+            print(f"\nAssistant: {response}\n")
+
+        except KeyboardInterrupt:
+            chat.print_history()
+            print("\nSession ended by user. Goodbye!\n")
+            break
+        except Exception as e:
+            print(f"\nError in main loop: {str(e)}\n")
+            logger.error(f"Error in main loop: {e}", exc_info=True)
 
 if __name__ == "__main__":
-    uvicorn.run(
-        "main:app",
-        host="0.0.0.0",
-        port=8000,
-        reload=settings.DEBUG,
-        log_level="info"
-    )
+    # Ensure all necessary environment variables are loaded for the entire system
+    from dotenv import load_dotenv
+    load_dotenv()
+    asyncio.run(main())

@@ -25,7 +25,6 @@ async def chat_with_agent(request: QueryRequest):
     Memory: YES - The agent remembers previous conversations
     """
     try:
-        # Input validation
         if not request.message.strip():
             raise HTTPException(
                 status_code=400,
@@ -37,11 +36,13 @@ async def chat_with_agent(request: QueryRequest):
         # Process with agent (memory is handled automatically by the planner)
         result = planner.plan_and_execute(request.message, request.chat_history)
         
+        # IMPORTANT: Return the updated chat history so the client can send it back
         return QueryResponse(
             response=result["final_answer"],
             tools_used=result["tools_used"],
             decision_points=result["decision_points"],
-            success=result["success"]
+            success=result["success"],
+            chat_history=result["updated_chat_history"] # <-- ADD THIS
         )
         
     except HTTPException:

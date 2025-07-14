@@ -18,6 +18,7 @@ class QueryResponse(BaseModel):
     decision_points: List[str] = []
     success: bool = True
     timestamp: datetime = Field(default_factory=datetime.now)
+    chat_history: List[Dict] = Field(default=[], description="Updated conversation history")
 
 class ProductQueryRequest(BaseModel):
     query: str = Field(..., min_length=1, max_length=500, description="Product search query")
