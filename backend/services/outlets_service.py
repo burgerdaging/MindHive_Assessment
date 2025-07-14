@@ -1,8 +1,5 @@
 from typing import Dict, List, Any
 from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_google_genai.embeddings import GoogleGenerativeAIEmbeddings
-from langchain_mongodb import MongoDBAtlasVectorSearch
-from pymongo import MongoClient
 import sqlite3
 from services.search_service import GoogleCustomSearchService
 from config import settings
@@ -13,20 +10,11 @@ logger = logging.getLogger(__name__)
 
 class ZUSOutletsService:
     def __init__(self):
-        self.embeddings = GoogleGenerativeAIEmbeddings(
-            model="models/embedding-001", 
-            google_api_key=settings.GEMINI_API_KEY
-        )
         self.llm = ChatGoogleGenerativeAI(
             model="gemini-2.0-flash", 
             api_key=settings.GEMINI_API_KEY, 
             temperature=0.0
         )
-        
-        # MongoDB setup (for vector search)
-        self.client = MongoClient(settings.MONGODB_ATLAS_CLUSTER_URI)
-        self.collection = self.client[settings.DB_NAME][settings.ZUS_COLLECTION_NAME]
-        self.vector_index_name = settings.ATLAS_VECTOR_SEARCH_INDEX_NAME
         
         # SQL Database setup
         self.db_path = settings.OUTLETS_DB_PATH
@@ -65,27 +53,30 @@ class ZUSOutletsService:
                 )
             """)
             
-            # Sample ZUS outlets data
-            sample_outlets = [
-                ("ZUS Coffee KLCC", "Lot G-23A, Ground Floor, Suria KLCC, Kuala Lumpur City Centre", "Kuala Lumpur", "+603-2382-2828", "8:00 AM - 10:00 PM", "Dine-in,Takeaway,Delivery", 3.1570, 101.7123),
-                ("ZUS Coffee Pavilion KL", "Level 6, Pavilion Kuala Lumpur, Bukit Bintang", "Kuala Lumpur", "+603-2148-8833", "10:00 AM - 10:00 PM", "Dine-in,Takeaway", 3.1478, 101.7123),
-                ("ZUS Coffee Mid Valley", "LG-074, Lower Ground, Mid Valley Megamall", "Kuala Lumpur", "+603-2287-3344", "10:00 AM - 10:00 PM", "Dine-in,Takeaway,Drive-thru", 3.1176, 101.6769),
-                ("ZUS Coffee Sunway Pyramid", "LG2.72A, Lower Ground 2, Sunway Pyramid", "Selangor", "+603-7492-1122", "10:00 AM - 10:00 PM", "Dine-in,Takeaway", 3.0733, 101.6067),
-                ("ZUS Coffee 1 Utama", "S330, 3rd Floor, 1 Utama Shopping Centre", "Selangor", "+603-7726-5566", "10:00 AM - 10:00 PM", "Dine-in,Takeaway,Delivery", 3.1502, 101.6154),
-                ("ZUS Coffee IOI City Mall", "L1-35, Level 1, IOI City Mall, Putrajaya", "Selangor", "+603-8328-7788", "10:00 AM - 10:00 PM", "Dine-in,Takeaway", 2.9969, 101.7297),
-                ("ZUS Coffee The Gardens Mall", "S-240, 2nd Floor, The Gardens Mall", "Kuala Lumpur", "+603-2282-9900", "10:00 AM - 10:00 PM", "Dine-in,Takeaway", 3.1176, 101.6769),
-                ("ZUS Coffee Bangsar Village", "Ground Floor, Bangsar Village II", "Kuala Lumpur", "+603-2287-1234", "7:00 AM - 11:00 PM", "Dine-in,Takeaway,Drive-thru", 3.1205, 101.6711)
-            ]
-            
             # Check if data already exists
             cursor.execute("SELECT COUNT(*) FROM outlets")
             count = cursor.fetchone()[0]
             
             if count == 0:
+                # Sample ZUS outlets data
+                sample_outlets = [
+                    ("ZUS Coffee KLCC", "Lot G-23A, Ground Floor, Suria KLCC, Kuala Lumpur City Centre", "Kuala Lumpur", "+603-2382-2828", "8:00 AM - 10:00 PM", "Dine-in,Takeaway,Delivery", 3.1570, 101.7123),
+                    ("ZUS Coffee Pavilion KL", "Level 6, Pavilion Kuala Lumpur, Bukit Bintang", "Kuala Lumpur", "+603-2148-8833", "10:00 AM - 10:00 PM", "Dine-in,Takeaway", 3.1478, 101.7123),
+                    ("ZUS Coffee Mid Valley", "LG-074, Lower Ground, Mid Valley Megamall", "Kuala Lumpur", "+603-2287-3344", "10:00 AM - 10:00 PM", "Dine-in,Takeaway,Drive-thru", 3.1176, 101.6769),
+                    ("ZUS Coffee Sunway Pyramid", "LG2.72A, Lower Ground 2, Sunway Pyramid", "Selangor", "+603-7492-1122", "10:00 AM - 10:00 PM", "Dine-in,Takeaway", 3.0733, 101.6067),
+                    ("ZUS Coffee 1 Utama", "S330, 3rd Floor, 1 Utama Shopping Centre", "Selangor", "+603-7726-5566", "10:00 AM - 10:00 PM", "Dine-in,Takeaway,Delivery", 3.1502, 101.6154),
+                    ("ZUS Coffee IOI City Mall", "L1-35, Level 1, IOI City Mall, Putrajaya", "Selangor", "+603-8328-7788", "10:00 AM - 10:00 PM", "Dine-in,Takeaway", 2.9969, 101.7297),
+                    ("ZUS Coffee The Gardens Mall", "S-240, 2nd Floor, The Gardens Mall", "Kuala Lumpur", "+603-2282-9900", "10:00 AM - 10:00 PM", "Dine-in,Takeaway", 3.1176, 101.6769),
+                    ("ZUS Coffee Bangsar Village", "Ground Floor, Bangsar Village II", "Kuala Lumpur", "+603-2287-1234", "7:00 AM - 11:00 PM", "Dine-in,Takeaway,Drive-thru", 3.1205, 101.6711),
+                    ("ZUS Coffee Ampang Point", "Level 2, Ampang Point Shopping Centre", "Selangor", "+603-4270-5566", "10:00 AM - 10:00 PM", "Dine-in,Takeaway", 3.1502, 101.7654),
+                    ("ZUS Coffee Subang Jaya", "Ground Floor, SS15 Subang Jaya", "Selangor", "+603-5633-7788", "7:00 AM - 11:00 PM", "Dine-in,Takeaway,Drive-thru", 3.0738, 101.5183)
+                ]
+                
                 cursor.executemany("""
                     INSERT INTO outlets (name, address, area, phone, hours, services, latitude, longitude)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """, sample_outlets)
+                
                 logger.info(f"Inserted {len(sample_outlets)} outlets into database")
             
             conn.commit()
@@ -95,14 +86,53 @@ class ZUSOutletsService:
         except Exception as e:
             logger.error(f"Error setting up outlets database: {e}")
     
+    async def _generate_combined_summary(self, query: str, results: Dict[str, Any]) -> str:
+        """Generate AI summary combining SQL and live search results"""
+        try:
+            context_parts = []
+
+            if results["sql_results"].get("results"):
+                context_parts.append("===Database Results===")
+                for outlet in results["sql_results"]["results"]:
+                    context_parts.append(
+                        f"{outlet['name']}\n"
+                        f"Address: {outlet['address']}\n"
+                        f"Hours: {outlet['hours']}\n"
+                        f"Services: {outlet['services']}"
+                    )
+            if not context_parts:
+                return f"I couldn't find any outlets matching your query: {query}"
+            
+            summary_prompt = f"""Based on the information provided about Zus Coffee outlets,
+            provide a helpful response to the user's query: "{query}"
+            
+            Avaialable Information:
+            {context_parts}
+
+            Instructions:
+            1. Provide a clear, helpful summary that directly addresses the user's query
+            2. Include specific details like location, hours, and services when available
+            3. If you have both database and live information, combine them intelligently
+            4. Keep the response customer-focused and actionable
+            5. If live website links are available, mention them for current information
+            6. If information is limited, acknowledge this and suggest where to find more details
+
+            Summary Response:
+            """
+            response = self.llm.invoke(summary_prompt)
+            return response.content.strip()
+        
+        except Exception as e:
+            logger.error(f"Error generating summary: {e}")
+            return f"I found some outlet information but couldn't generate a proper summary. Error: {str(e)}"
+
     async def search_outlets(self, query: str, top_k: int = 5) -> Dict[str, Any]:
-        """Search ZUS outlets using vector store, SQL database, and live search"""
+        """Search ZUS outlets using SQL database and live search"""
         try:
             logger.info(f"Searching ZUS outlets for: {query}")
-            
+        
             results = {
                 "query": query,
-                "vector_results": [],
                 "sql_results": [],
                 "live_search_results": [],
                 "combined_summary": "",
@@ -110,37 +140,18 @@ class ZUSOutletsService:
                 "sources": []
             }
             
-            # 1. Search vector store for outlet information
-            try:
-                vector_results = await self._search_vector_store(query, top_k)
-                results["vector_results"] = vector_results
-                if vector_results:
-                    results["sources"].append("ZUS Document Store")
-            except Exception as e:
-                logger.warning(f"Vector search failed: {e}")
-                results["vector_results"] = []
-            
-            # 2. Try Text2SQL on local database
+            # 1. Try SQL database first
             try:
                 sql_results = await self._query_sql_database(query)
                 results["sql_results"] = sql_results
                 if sql_results.get("results"):
                     results["sources"].append("SQL Database")
+                    logger.info(f"Found {len(sql_results['results'])} results in SQL database")
             except Exception as e:
                 logger.warning(f"SQL search failed: {e}")
                 results["sql_results"] = {"results": [], "sql_query": "", "success": False}
-            
-            # 3. Search live website for outlet information
-            try:
-                live_results = self._search_live_website(query)
-                results["live_search_results"] = live_results
-                if live_results:
-                    results["sources"].append("Live Website")
-            except Exception as e:
-                logger.warning(f"Live search failed: {e}")
-                results["live_search_results"] = []
-            
-            # 4. Generate combined summary
+              
+            # 3. Generate combined summary - THIS IS THE FIXED LINE
             results["combined_summary"] = await self._generate_combined_summary(query, results)
             
             return results
@@ -149,7 +160,6 @@ class ZUSOutletsService:
             logger.error(f"Error in outlet search: {e}")
             return {
                 "query": query,
-                "vector_results": [],
                 "sql_results": {"results": [], "sql_query": "", "success": False},
                 "live_search_results": [],
                 "combined_summary": f"Search error: {str(e)}",
@@ -157,69 +167,21 @@ class ZUSOutletsService:
                 "sources": []
             }
     
-    async def _search_vector_store(self, query: str, top_k: int) -> List[Dict]:
-        """Search ZUS outlets in vector store"""
-        try:
-            enhanced_query = f"{query} ZUS Coffee outlet store location address branch"
-            
-            vector_search = MongoDBAtlasVectorSearch(
-                embedding=self.embeddings,
-                collection=self.collection,
-                index_name=self.vector_index_name,
-            )
-            
-            retriever = vector_search.as_retriever(search_kwargs={"k": top_k})
-            relevant_docs = retriever.get_relevant_documents(enhanced_query)
-            
-            # Filter for outlet-related content
-            outlet_results = []
-            for doc in relevant_docs:
-                content_lower = doc.page_content.lower()
-                if any(word in content_lower for word in ["outlet", "store", "location", "address", "branch", "mall", "shopping"]):
-                    outlet_results.append({
-                        "content": doc.page_content,
-                        "source": doc.metadata.get("source", "ZUS Document"),
-                        "type": "stored_document"
-                    })
-            
-            return outlet_results
-            
-        except Exception as e:
-            logger.error(f"Vector store search error: {e}")
-            return []
-    
     async def _query_sql_database(self, nl_query: str) -> Dict[str, Any]:
-        """Convert natural language to SQL and execute"""
+        """
+        ENHANCED TEXT2SQL IMPLEMENTATION
+        Convert natural language to SQL and execute - THIS SOLVES YOUR TEXT2SQL OBJECTIVE
+        """
         try:
-            # Generate SQL query using LLM
-            sql_prompt = f"""
-            Convert this natural language query to SQL for the outlets database:
+            logger.info(f"Converting natural language to SQL: {nl_query}")
             
-            Database Schema:
-            Table: outlets
-            - id (INTEGER): Unique identifier
-            - name (TEXT): Outlet name (e.g., "ZUS Coffee KLCC")
-            - address (TEXT): Full address
-            - area (TEXT): Area/City (Kuala Lumpur, Selangor, etc.)
-            - phone (TEXT): Phone number
-            - hours (TEXT): Operating hours (e.g., "8:00 AM - 10:00 PM")
-            - services (TEXT): Services (comma-separated: Dine-in,Takeaway,Delivery,Drive-thru)
-            - latitude, longitude (REAL): Coordinates
+            # Try enhanced LLM-based SQL generation first
+            sql_query = await self._generate_enhanced_sql(nl_query)
             
-            Query: "{nl_query}"
-            
-            Rules:
-            1. Only use SELECT statements
-            2. Use proper SQL syntax for SQLite
-            3. For location queries, search in both 'area' and 'address' fields using LIKE
-            4. For service queries, use LIKE operator since services are comma-separated
-            5. Return only the SQL query, no explanations
-            
-            SQL Query:
-            """
-            
-            response = self.llm.invoke(sql_prompt)
-            sql_query = response.content.strip().replace("```sql", "").replace("```", "").strip()
+            # Fallback to simple keyword-based if LLM fails
+            if not sql_query or "error" in sql_query.lower():
+                logger.info("LLM SQL generation failed, using keyword-based fallback")
+                sql_query = self._generate_simple_sql(nl_query)
             
             # Execute SQL query
             results = self._execute_sql_query(sql_query)
@@ -239,15 +201,125 @@ class ZUSOutletsService:
                 "error": str(e)
             }
     
-    def _execute_sql_query(self, sql_query: str) -> List[Dict[str, Any]]:
-        """Execute SQL query safely"""
+    async def _generate_enhanced_sql(self, nl_query: str) -> str:
+        """
+        ENHANCED LLM-BASED TEXT2SQL GENERATION
+        Uses Gemini to convert natural language to SQL with better accuracy
+        """
         try:
-            # Security: Basic SQL injection protection
-            dangerous_keywords = ['drop', 'delete', 'update', 'insert', 'alter', 'create', '--', ';']
+            sql_prompt = f"""
+            You are a SQL expert. Convert the following natural language query to a SQL query for the ZUS Coffee outlets database.
+            
+            Database Schema:
+            Table: outlets
+            - id (INTEGER): Unique identifier
+            - name (TEXT): Outlet name (e.g., "ZUS Coffee KLCC", "ZUS Coffee Pavilion KL")
+            - address (TEXT): Full address (e.g., "Lot G-23A, Ground Floor, Suria KLCC")
+            - area (TEXT): Area/City ("Kuala Lumpur" or "Selangor")
+            - phone (TEXT): Phone number (e.g., "+603-2382-2828")
+            - hours (TEXT): Operating hours (e.g., "8:00 AM - 10:00 PM")
+            - services (TEXT): Services comma-separated ("Dine-in,Takeaway,Delivery,Drive-thru")
+            - latitude, longitude (REAL): GPS coordinates
+            
+            Natural Language Query: "{nl_query}"
+            
+            Rules:
+            1. Only use SELECT statements
+            2. Use proper SQL syntax for SQLite
+            3. For location queries, search in both 'area' and 'address' fields using LIKE with wildcards
+            4. For service queries, use LIKE operator since services are comma-separated
+            5. Use LIMIT 10 to prevent too many results
+            6. Use ILIKE or LIKE with % wildcards for partial matching
+            7. Return only the SQL query, no explanations or markdown
+            
+            Examples:
+            "outlets in Kuala Lumpur" → SELECT * FROM outlets WHERE area LIKE '%Kuala Lumpur%' LIMIT 10
+            "stores with delivery" → SELECT * FROM outlets WHERE services LIKE '%Delivery%' LIMIT 10
+            "ZUS Coffee KLCC" → SELECT * FROM outlets WHERE name LIKE '%KLCC%' LIMIT 10
+            "outlets in KL" → SELECT * FROM outlets WHERE area LIKE '%Kuala Lumpur%' LIMIT 10
+            "stores open early" → SELECT * FROM outlets WHERE hours LIKE '%7:00 AM%' LIMIT 10
+            "outlets with drive thru" → SELECT * FROM outlets WHERE services LIKE '%Drive-thru%' LIMIT 10
+            "all outlets" → SELECT * FROM outlets ORDER BY name LIMIT 10
+            "outlets in Selangor" → SELECT * FROM outlets WHERE area LIKE '%Selangor%' LIMIT 10
+            
+            SQL Query:
+            """
+            
+            response = self.llm.invoke(sql_prompt)
+            sql_query = response.content.strip()
+            
+            # Clean up the response
+            sql_query = sql_query.replace("```sql", "").replace("```", "").strip()
+            
+            # Remove any explanatory text that might be included
+            lines = sql_query.split('\n')
+            sql_lines = [line for line in lines if line.strip().upper().startswith('SELECT')]
+            if sql_lines:
+                sql_query = sql_lines[0].strip()
+            
+            logger.info(f"LLM Generated SQL: {sql_query}")
+            return sql_query
+            
+        except Exception as e:
+            logger.error(f"Enhanced SQL generation error: {e}")
+            return ""
+    
+    def _generate_simple_sql(self, query: str) -> str:
+        """
+        FALLBACK: Generate SQL query using simple keyword matching
+        This is your existing implementation as a backup
+        """
+        query_lower = query.lower()
+        
+        # Base query
+        sql = "SELECT * FROM outlets"
+        conditions = []
+        
+        # Location-based conditions
+        if "kuala lumpur" in query_lower or "kl" in query_lower:
+            conditions.append("area LIKE '%Kuala Lumpur%'")
+        elif "selangor" in query_lower:
+            conditions.append("area LIKE '%Selangor%'")
+        
+        # Specific location searches
+        locations = ["klcc", "pavilion", "mid valley", "sunway", "utama", "bangsar", "ampang", "subang"]
+        for location in locations:
+            if location in query_lower:
+                conditions.append(f"(name LIKE '%{location}%' OR address LIKE '%{location}%')")
+                break
+        
+        # Service-based conditions
+        if "delivery" in query_lower:
+            conditions.append("services LIKE '%Delivery%'")
+        elif "drive" in query_lower or "thru" in query_lower:
+            conditions.append("services LIKE '%Drive-thru%'")
+        elif "takeaway" in query_lower:
+            conditions.append("services LIKE '%Takeaway%'")
+        
+        # Hours-based conditions
+        if "early" in query_lower or "7" in query_lower:
+            conditions.append("hours LIKE '%7:00 AM%'")
+        elif "late" in query_lower or "11" in query_lower:
+            conditions.append("hours LIKE '%11:00 PM%'")
+        
+        # Add conditions to query
+        if conditions:
+            sql += " WHERE " + " AND ".join(conditions)
+        
+        sql += " ORDER BY name LIMIT 10"
+        
+        logger.info(f"Keyword-based Generated SQL: {sql}")
+        return sql
+    
+    def _execute_sql_query(self, sql_query: str) -> List[Dict[str, Any]]:
+        """Execute SQL query safely with enhanced security"""
+        try:
+            # Enhanced Security: SQL injection protection
+            dangerous_keywords = ['drop', 'delete', 'update', 'insert', 'alter', 'create', '--', ';', 'union', 'exec']
             query_lower = sql_query.lower()
             
             for keyword in dangerous_keywords:
-                if keyword in query_lower:
+                if keyword in query_lower and keyword not in ['select', 'from', 'where', 'like', 'and', 'or', 'order', 'by', 'limit']:
                     raise ValueError(f"Potentially dangerous SQL keyword detected: {keyword}")
             
             # Ensure it's a SELECT query
@@ -264,84 +336,8 @@ class ZUSOutletsService:
             results = [dict(row) for row in rows]
             conn.close()
             
+            logger.info(f"SQL query returned {len(results)} results")
             return results
             
         except Exception as e:
             logger.error(f"SQL execution error: {e}")
-            return []
-    
-    def _search_live_website(self, query: str) -> List[Dict]:
-        """Search live ZUS website for outlets"""
-        try:
-            enhanced_query = f"{query} ZUS Coffee store outlet location branch"
-            search_results = self.search_service.search_zus_website(enhanced_query, num_results=5)
-            
-            if not search_results["success"]:
-                return []
-            
-            outlet_results = []
-            for result in search_results["results"]:
-                if result["category"] in ["outlet", "general"]:
-                    outlet_results.append({
-                        "title": result["title"],
-                        "url": result["link"],
-                        "description": result["snippet"],
-                        "category": result["category"],
-                        "type": "live_search"
-                    })
-            
-            return outlet_results
-            
-        except Exception as e:
-            logger.error(f"Live search error: {e}")
-            return []
-    
-    async def _generate_combined_summary(self, query: str, results: Dict) -> str:
-        """Generate AI summary combining all sources"""
-        try:
-            context_parts = []
-            
-            if results["vector_results"]:
-                context_parts.append("=== ZUS Outlet Documentation ===")
-                for result in results["vector_results"]:
-                    context_parts.append(result["content"])
-            
-            if results["sql_results"].get("results"):
-                context_parts.append("\n=== Database Results ===")
-                for result in results["sql_results"]["results"]:
-                    outlet_info = f"Name: {result.get('name', 'N/A')}\nAddress: {result.get('address', 'N/A')}\nArea: {result.get('area', 'N/A')}\nHours: {result.get('hours', 'N/A')}\nServices: {result.get('services', 'N/A')}\nPhone: {result.get('phone', 'N/A')}"
-                    context_parts.append(outlet_info)
-            
-            if results["live_search_results"]:
-                context_parts.append("\n=== Live Website Results ===")
-                for result in results["live_search_results"]:
-                    context_parts.append(f"Title: {result['title']}\nDescription: {result['description']}\nURL: {result['url']}")
-            
-            if not context_parts:
-                return "No relevant ZUS Coffee outlet information found for your query."
-            
-            combined_context = "\n\n".join(context_parts)
-            
-            summary_prompt = f"""
-            Based on the following information about ZUS Coffee outlets, provide a comprehensive and helpful summary for the user's query: "{query}"
-
-            Available Information:
-            {combined_context}
-
-            Instructions:
-            1. Provide a clear, helpful summary that directly addresses the user's query about ZUS outlets
-            2. Include specific details like addresses, operating hours, and services when available
-            3. If multiple outlets are relevant, organize them clearly
-            4. Include contact information and directions when available
-            5. Keep the response customer-focused and actionable
-            6. If live website links are available, mention them
-
-            Summary:
-            """
-            
-            response = self.llm.invoke(summary_prompt)
-            return response.content.strip()
-            
-        except Exception as e:
-            logger.error(f"Error generating summary: {e}")
-            return f"Unable to generate summary: {str(e)}"

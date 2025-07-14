@@ -1,20 +1,29 @@
-# backend/app.py
-# Part 1 endpoint is here
-import os
-from dotenv import load_dotenv
+import logging
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain_core.runnables.history import RunnableWithMessageHistory
-from langchain_core.chat_history import InMemoryChatMessageHistory
+from fastapi.responses import JSONResponse
+from api.products import router as products_router
+from api.outlets import router as outlets_router
+from api.agent import router as agent_router
+from config import settings
 
-load_dotenv()
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+)
+logger = logging.getLogger(__name__)
 
-app = FastAPI()
+# Create FastAPI app
+app = FastAPI(
+    title=settings.APP_NAME,
+    description="AI Assistant with Agentic Planning and ZUS Coffee Integration",
+    version=settings.APP_VERSION,
+    docs_url="/docs",
+    redoc_url="/redoc"
+)
 
-# CORS Configuration
+# Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -23,54 +32,80 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Initialize LLM
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-llm = ChatGoogleGenerativeAI(model="gemini-2.0-flash", api_key=GEMINI_API_KEY, temperature=0.0)
-
-# Conversation setup
-prompt = ChatPromptTemplate.from_messages([
-    (
-        "system",
-        "You are a helpful Mathematics teacher, Answer all questions to the best of your ability in English"
-    ),
-    MessagesPlaceholder(variable_name="history"),
-    (
-        "human",
-        "{input}"
+# Global exception handler
+@app.exception_handler(Exception)
+async def global_exception_handler(request, exc):
+    logger.error(f"Global exception: {exc}")
+    return JSONResponse(
+        status_code=500,
+        content={
+            "error": "Internal server error",
+            "message": "An unexpected error occurred. Please try again later.",
+            "recovery_suggestions": [
+                "Check your input and try again",
+                "Contact support if the issue persists",
+                "Try a different query or endpoint"
+            ]
+        }
     )
-])
 
-chain = prompt | llm
-store = {}
-
-def get_message_history(session_id: str):
-    if session_id not in store:
-        store[session_id] = InMemoryChatMessageHistory()
-    return store[session_id]
-
-chain_with_history = RunnableWithMessageHistory(
-    chain,
-    get_message_history,
-    input_messages_key="input",
-    history_messages_key="history"
-)
-
-# Pydantic model for request
-class ChatRequest(BaseModel):
-    message: str
-    session_id: str = "default"
+# Include routers
+app.include_router(products_router)
+app.include_router(outlets_router)
+app.include_router(agent_router)
 
 @app.get("/")
-async def home():
-    return {"message": "MindHive Assessment Backend"}
+async def root():
+    """Root endpoint with API information"""
+    return {
+        "message": "ZUS Coffee AI Assistant API",
+        "version": settings.APP_VERSION,
+        "endpoints": {
+            "products": "/products?query=<your_question>",
+            "outlets": "/outlets?query=<your_question>",
+            "agent": "/agent/chat (POST)",
+            "docs": "/docs",
+            "health": "/health"
+        },
+        "features": [
+            "Agentic Planning and Tool Calling",
+            "ZUS Coffee Product Search",
+            "ZUS Coffee Outlet Search with Text2SQL",
+            "Vector Store Integration",
+            "Live Website Search",
+            "Error Handling and Security"
+        ]
+    }
 
-@app.post("/chat")
-async def chat(request: ChatRequest):
+@app.get("/health")
+async def health_check():
+    """Global health check endpoint"""
     try:
-        response = chain_with_history.invoke(
-            {"input": request.message},
-            {"configurable": {"session_id": request.session_id}}
-        )
-        return {"response": response.content}
+        return {
+            "status": "healthy",
+            "app": settings.APP_NAME,
+            "version": settings.APP_VERSION,
+            "services": {
+                "products": "/products/health",
+                "outlets": "/outlets/health", 
+                "agent": "/agent/health"
+            }
+        }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Health check failed: {e}")
+        return JSONResponse(
+            status_code=503,
+            content={
+                "status": "unhealthy",
+                "error": str(e)
+            }
+        )
+
+if __name__ == "__main__":
+    uvicorn.run(
+        "main:app",
+        host="0.0.0.0",
+        port=8000,
+        reload=settings.DEBUG,
+        log_level="info"
+    )
