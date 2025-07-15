@@ -67,4 +67,4 @@ GET /agent/health
 
 # VIDEO
 
-![demo](https://youtu.be/6limrCN9TB4)
+[![Demo Video](https://img.youtube.com/vi/6limrCN9TB4/0.jpg)](https://youtu.be/6limrCN9TB4)
